@@ -1,0 +1,4 @@
+# Good Egg configuration for testing
+thresholds:
+  high: 0.7
+  medium: 0.3

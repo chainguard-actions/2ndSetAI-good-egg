@@ -1,0 +1,81 @@
+name: 'Good Egg: Trust Scoring PRs'
+description: 'Score PR author trustworthiness using contribution graph analysis'
+author: 'Good Egg Contributors'
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+    default: ${{ github.token }}
+  config-path:
+    description: 'Path to .good-egg.yml config file'
+    required: false
+  comment:
+    description: 'Post a PR comment with the trust score'
+    required: false
+    default: 'true'
+  check-run:
+    description: 'Create a check run with the trust score'
+    required: false
+    default: 'false'
+  fail-on-low:
+    description: 'Fail the action if trust level is LOW'
+    required: false
+    default: 'false'
+outputs:
+  score:
+    description: 'Normalized trust score (0.0 - 1.0)'
+    value: ${{ steps.score.outputs.score }}
+  trust-level:
+    description: 'Trust level (HIGH, MEDIUM, LOW, UNKNOWN, BOT)'
+    value: ${{ steps.score.outputs.trust-level }}
+  user:
+    description: 'GitHub username that was scored'
+    value: ${{ steps.score.outputs.user }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.12'
+    - name: Install uv
+      uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+    - name: Install good-egg
+      shell: bash
+      env:
+        SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        uv sync --frozen
+    - name: Run Good Egg
+      id: score
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_CONFIG_PATH: ${{ inputs.config-path }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_CHECK-RUN: ${{ inputs.check-run }}
+        INPUT_FAIL-ON-LOW: ${{ inputs.fail-on-low }}
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        uv run python -m good_egg.action
+branding:
+  icon: 'shield'
+  color: 'green'
