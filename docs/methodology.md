@@ -1,0 +1,365 @@
+# Methodology
+
+For a higher-level introduction, see the [blog post](https://neotenyai.substack.com/p/scoring-open-source-contributors).
+
+## The Problem
+
+AI has eliminated the natural barrier to entry for open-source contributions. Generating a plausible pull request now takes seconds, not hours. The result: contribution volume is up, but signal-to-noise is down. Projects can no longer assume that a pull request represents genuine investment in the codebase.
+
+## Approaches to Trust
+
+### Explicit Vouching
+
+Mitchell Hashimoto's [Vouch](https://github.com/mitchellh/vouch) system takes the direct approach: maintainers manually vouch for contributors they trust. This creates a web-of-trust where established participants validate newcomers.
+
+**Strengths**: High-signal, rooted in human judgment, works well for tight-knit communities.
+
+**Weaknesses**: Manual effort that doesn't scale, cold-start problem for new projects with no vouch network, and requires maintainers to actively participate in a separate system.
+
+### Behavioral Mining
+
+Good Egg takes a different approach: instead of asking maintainers to do extra work, mine the contribution data that already exists.
+
+The core insight is that good open-source contributors are *already exhibiting good behavior* across the ecosystem. They have merged PRs in established projects, sustained contributions over time, and worked across multiple repositories. This existing track record is a strong signal -- and it's freely available through the GitHub API.
+
+Good Egg is automated, data-driven, and complements rather than replaces human review. It answers one specific question: *"Is this person an established contributor?"*
+
+## How Scoring Works
+
+### Data Collection
+
+Good Egg fetches a user's merged pull requests via the GitHub GraphQL API, along with metadata for each repository they've contributed to (stars, language, fork status, archived status).
+
+### Graph Construction
+
+The scoring engine builds a **bipartite directed graph** with two node types:
+
+- **User nodes** (`user:{login}`) -- the contributor being scored
+- **Repository nodes** (`repo:{owner/name}`) -- repositories they've contributed to
+
+Each merged PR creates a weighted edge from the user node to the repository node. Edge weights combine recency and quality:
+
+```
+edge_weight = recency_decay x repo_quality x edge_type_weight
+```
+
+The `edge_type_weight` for merged PRs is 1.0 (configurable via `edge_weights.merged_pr`).
+
+**Anti-gaming measures**:
+- Self-contributions (PRs to your own repos) are penalized at 0.3x weight
+- PRs per repository are capped at 20 to prevent inflation from a single project
+- Reverse edges (repo -> user) are added at 0.3x the forward weight
+
+### Recency Decay
+
+Recent contributions matter more than old ones. Good Egg applies exponential decay:
+
+```
+decay = exp(-0.693 x days_ago / half_life_days)
+```
+
+The default half-life is 180 days. Contributions older than `max_age_days` (default: 730 days) are excluded entirely.
+
+### Repository Quality
+
+Not all repositories are equal. Quality is computed as:
+
+```
+quality = log1p(stars x language_multiplier)
+```
+
+Penalties are applied for:
+- **Archived repositories**: 0.5x (project is no longer active)
+- **Forks**: 0.3x (lower signal of independent project quality)
+
+### Language Normalization
+
+Star counts vary enormously across ecosystems -- a 1,000-star Rust library represents a very different level of adoption than a 1,000-star JavaScript package. Good Egg applies static ecosystem-size multipliers to normalize:
+
+| Language | Multiplier | Rationale |
+|----------|-----------|-----------|
+| JavaScript | 1.00 | Baseline (largest ecosystem) |
+| Python | 1.13 | |
+| Go | 2.30 | |
+| Rust | 2.63 | |
+| Zig | 5.44 | Niche; fewer repos, lower star counts |
+
+These are selected examples from the full 26-language multiplier table (see `LanguageNormalization` in `config.py`). Multipliers are derived from relative ecosystem sizes on GitHub. Contributions to niche ecosystems are weighted higher because they represent rarer, harder work.
+
+### Personalization Vector
+
+Graph scoring uses a personalization (restart) vector to bias the random walk toward the context repository. The raw weights before normalization:
+
+| Node type | Raw weight | Purpose |
+|-----------|------------|---------|
+| Context repository | 0.50 | Strongest signal: contributions to *this* project |
+| Same-language repos | 0.30 | Ecosystem relevance |
+| Other repos | 0.03 | Baseline (adjusted for contributor diversity and volume) |
+| User nodes | 0.00 | Users don't seed the walk |
+
+These raw weights are normalized to sum to 1.0, so actual values in the random walk depend on graph composition. The "other repos" weight is dynamically adjusted based on contributor diversity (number of unique repos) and volume (total PRs), so prolific cross-ecosystem contributors aren't unfairly penalized.
+
+### Scoring and Normalization
+
+**v3 (default):** The score is the alltime merge rate: merged PRs divided
+by total PRs (merged + closed). This value is used directly as both
+`raw_score` and `normalized_score`, since it is already in [0, 1]. No
+graph construction is performed.
+
+**v1:** The directed graph is scored using personalized graph-based ranking
+with a damping factor (alpha) of 0.85. Normalization converts the raw
+graph score to a 0-1 range:
+
+```
+baseline = 1 / num_nodes
+ratio = raw_score / baseline
+normalized = ratio / (ratio + 1)
+```
+
+This sigmoid-like mapping means a score equal to the uniform baseline maps to 0.5, with diminishing returns above.
+
+**v2:** The normalized graph score is combined with merge rate and account age into a logit, then passed through a sigmoid:
+
+```
+logit = intercept + graph_score_weight * graph_score
+      + merge_rate_weight * merge_rate
+      + account_age_weight * log(account_age_days + 1)
+
+normalized = 1 / (1 + e^(-logit))
+```
+
+`raw_score` in the v2 output contains the pre-sigmoid logit value.
+
+### Classification
+
+| Level | Threshold | Meaning |
+|-------|-----------|---------|
+| **HIGH** | >= 0.70 | Established contributor with strong cross-project history |
+| **MEDIUM** | >= 0.30 | Some history, limited breadth or recency |
+| **LOW** | < 0.30 | Little to no prior contribution history |
+| **UNKNOWN** | -- | Insufficient data (no merged PRs found) |
+| **BOT** | -- | Detected bot account |
+
+## Known Limitations
+
+### New Contributor Cold Start
+
+Good Egg measures *established* contribution history by design. A genuinely talented developer making their first open-source contribution will score LOW -- and that's correct behavior, not a bug. The tool answers "is this person an established contributor?", not "is this person trustworthy?".
+
+Different tools are needed for discovering promising new contributors. Good Egg is a point solution for one specific question.
+
+### Language Normalization is Approximate
+
+Static multipliers don't capture project relatedness beyond language. A contributor to `tokio` (Rust async runtime) is probably more relevant to a Rust web framework than a contributor to a Rust game engine, but Good Egg treats both equally.
+
+A possible extension: graph-based relatedness, where shared contributors between projects create implicit edges indicating project similarity.
+
+### API Constraints
+
+GitHub rate limits bound how much data can be fetched per user. Good Egg is designed to be cheap to compute within these constraints -- typically 2-4 API calls per scored user. This means the scoring graph is necessarily incomplete, built from the most recent and most visible contributions rather than a complete history.
+
+## Possible Extensions
+
+- **Graph-based project relatedness**: Use shared contributors between projects as edges in a project similarity graph, replacing or supplementing language-only normalization.
+- **Review and issue activity**: PRs aren't the only signal. Code reviews and issue participation indicate engagement patterns.
+- **Organization membership**: Membership in established GitHub organizations as an additional trust signal.
+- **Cross-platform data**: Contribution data from GitLab, Codeberg, and other forges to build a more complete picture.
+
+---
+
+## Diet Egg (v3)
+
+The v3 scoring model -- branded "Diet Egg" in PR comments -- is the default
+since v3 was introduced. It uses alltime merge rate as the sole scoring
+input, dropping graph score and log account age from the v2 logistic
+regression.
+
+### Motivation
+
+Experimental data from the validation study showed that:
+
+1. **Graph score (hub_score) hurts performance for unknown contributors.**
+   The graph is most useful for contributors with extensive cross-project
+   history, but for the primary use case -- evaluating unfamiliar PR
+   authors -- it adds noise.
+2. **Log account age adds nothing significant.** While statistically
+   significant in isolation, account age does not improve ranking
+   performance when combined with merge rate.
+
+Merge rate alone provides a simple, fast, and effective signal. v3 requires
+no graph construction, no pagerank computation, and no logistic regression.
+
+### Fresh Egg Advisory
+
+Accounts less than 365 days old receive a "Fresh Egg" advisory in the
+output. This is informational only and does not affect the score. In the
+validation data, fresh accounts correlate with approximately 16 percentage
+points lower merge rates.
+
+The advisory is attached to all scoring paths (v1, v2, v3) and to the
+insufficient-data short circuit. It is not attached to bot accounts (whose
+synthetic profiles have unreliable age data) or to existing contributor
+early returns (where no profile data is fetched).
+
+### Component Scores
+
+v3 output includes a single component:
+
+| Component | Description |
+|-----------|-------------|
+| `merge_rate` | Fraction of PRs that were merged: `merged / (merged + closed)` |
+
+The `scoring_metadata` contains `closed_pr_count` for transparency.
+
+---
+
+## Better Egg (v2)
+
+The v2 scoring model -- branded "Better Egg" in PR comments -- extends the
+graph-based approach with external features combined via logistic regression.
+It is available via `scoring_model: v2` in configuration.
+
+### Motivation
+
+The v1 graph score relies entirely on contribution-graph structure. Two
+observable signals sit outside that graph:
+
+1. **Merge rate** -- the fraction of a user's PRs that were merged vs closed.
+   The v1 data pipeline only fetches *merged* PRs, creating survivorship bias.
+   Merge rate re-introduces the rejected-PR signal.
+2. **Account age** -- how long the GitHub account has existed. Older accounts
+   correlate with established contributors and help with cold-start cases
+   where few merged PRs are available.
+
+A third candidate, **text dissimilarity** (comparing PR descriptions to
+repository README content), was investigated and intentionally excluded.
+The signal was inverted -- higher similarity correlated with *lower* merge
+probability -- likely because low-effort PRs tend to parrot project language
+while experienced contributors write more targeted descriptions. Until this
+inverted signal is better understood, it is not included in the production
+scoring model.
+
+### Simplified Graph
+
+The v2 model uses a simplified graph construction compared to v1:
+
+- **No self-contribution penalty** -- PRs to your own repos are weighted
+  equally.
+- **No language normalization in repo quality** -- star counts are used
+  directly without ecosystem-size multipliers.
+- **No diversity/volume adjustment** -- the "other repos" weight is static,
+  not dynamically adjusted.
+
+Language match personalization weighting (`same_language_weight`) is
+**retained** -- both repo quality and language match showed small but
+statistically significant effects in the validation study.
+
+These simplifications reduce the number of tunable parameters and let the
+logistic regression handle signal combination instead.
+
+### External Features
+
+| Feature | Formula | Range |
+|---------|---------|-------|
+| Merge rate | `merged / (merged + closed)` | 0.0 -- 1.0 |
+| Account age | `log(account_age_days + 1)` | 0.0 -- ~4.3 |
+
+Both features are computed from data already available through the GitHub API
+at no additional cost.
+
+> **Note on merge rate scope:** The merge rate uses total lifetime counts
+> (all merged PRs divided by all merged + closed PRs), not temporally-scoped
+> counts limited to a recent window. While temporal scoping was considered in
+> the original design, the implementation uses lifetime totals as a deliberate
+> simplification -- lifetime counts are cheaper to compute, available from the
+> existing data pipeline, and showed sufficient discriminative power in the
+> validation study.
+
+### Combined Model
+
+The three components -- graph score, merge rate, and log account age -- are
+combined via logistic regression:
+
+```
+p = sigmoid(intercept + w1 * graph_score + w2 * merge_rate + w3 * log_account_age)
+```
+
+The sigmoid function maps the linear combination to a 0-1 probability, which
+is used as the final normalized score. The trained weights are:
+
+| Coefficient | Value |
+|-------------|-------|
+| `intercept` | -0.8094 |
+| `graph_score_weight` | 1.9138 |
+| `merge_rate_weight` | -0.7783 |
+| `account_age_weight` | 0.1493 |
+
+These were trained on the validation study data (see below).
+
+> **Why is `merge_rate_weight` negative?** The negative coefficient does not
+> mean "high merge rate is bad." In a multivariate model, each coefficient is
+> conditional on the other features. The graph score already captures
+> contribution success history -- users with many merged PRs across repos
+> naturally get high graph scores. The negative merge rate weight acts as a
+> correction for survivorship bias: users who contribute to many repos
+> (reflected in their graph score) tend to attempt more ambitious
+> cross-project contributions and consequently have lower merge rates. Given
+> an already-high graph score, a very high merge rate does not add further
+> positive signal -- the model interprets it as slight evidence of narrower
+> contribution scope.
+
+> **Reduced model for missing merge rate:** When merge rate is unavailable
+> (e.g. a user with no prior closed PRs), the model drops the merge rate
+> term, effectively using a two-feature reduced model (graph_score +
+> account_age). Since the weights were trained with all three features
+> present, the reduced model is an approximation -- the coefficients are not
+> re-estimated for the two-feature case.
+
+### Validation
+
+The v2 model was trained and evaluated on 5,129 PRs (of 5,417 total,
+filtered to those with merge rate data) drawn from 49 repositories in a
+validation study.
+
+| Metric | v1 / Good Egg (graph only) | v2 / Better Egg (combined) |
+|--------|-----------------|---------------|
+| AUC | 0.647 | 0.647 |
+
+The AUC difference is not statistically significant -- the combined model
+does not improve ranking performance over the graph alone. However, the
+individual features carry statistically significant information:
+
+- **Merge rate**: Likelihood Ratio Test p < 10^-12
+- **Account age**: Likelihood Ratio Test p = 1.2 x 10^-5
+
+### Why Include Features That Don't Improve AUC?
+
+The merge rate and account age features are retained despite the flat AUC
+because they address structural limitations of the graph-only model:
+
+- **Merge rate** corrects survivorship bias. The v1 pipeline only sees merged
+  PRs, so a user with 10 merged and 90 closed looks identical to one with 10
+  merged and 0 closed. Merge rate distinguishes them.
+- **Account age** provides signal in cold-start scenarios where the graph has
+  few edges. A 10-year-old account with 2 merged PRs is qualitatively
+  different from a 2-day-old account with 2 merged PRs.
+
+Both features carry real information (confirmed by likelihood ratio tests);
+the AUC flatness reflects the fact that graph structure already captures most
+of the ranking signal in the validation dataset.
+
+### Component Score Breakdown
+
+v2 output includes a component-level breakdown showing the individual
+contribution of each feature:
+
+| Component | Description |
+|-----------|-------------|
+| `graph_score` | Normalized graph-based trust score (same as v1 output) |
+| `merge_rate` | Fraction of PRs that were merged (omitted when unavailable) |
+| `log_account_age` | Log-transformed account age in days |
+
+The final logistic regression output is available as `normalized_score` on
+the `TrustScore` result. The component scores show the individual feature
+values that fed into the combined model, letting users understand which
+factors are driving the overall score.

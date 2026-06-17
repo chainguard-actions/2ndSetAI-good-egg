@@ -1,0 +1,253 @@
+# Configuration Reference
+
+Good Egg is configured via a YAML file, environment variables, or
+programmatically through the `GoodEggConfig` class.
+
+## Configuration File
+
+Place a `.good-egg.yml` file in your repository root. The GitHub Action
+auto-detects this file; for the CLI, pass `--config` to the `score`
+subcommand:
+
+```bash
+good-egg score <username> --repo owner/name --config .good-egg.yml
+```
+
+See [examples/.good-egg.yml](../examples/.good-egg.yml) for a complete
+example with all defaults.
+
+## Config Precedence
+
+Configuration values are resolved in this order (highest priority first):
+
+1. **CLI arguments** (e.g. `--token`)
+2. **Environment variables** (e.g. `GOOD_EGG_ALPHA`)
+3. **YAML config file**
+4. **Built-in defaults**
+
+## Scoring Model
+
+Good Egg supports three scoring models. Set the model at the top level of
+the config file:
+
+```yaml
+scoring_model: v3   # default -- Diet Egg -- alltime merge rate as sole signal
+scoring_model: v2   # Better Egg -- graph + external features via logistic regression
+scoring_model: v1   # Good Egg -- graph-based scoring only
+```
+
+PR comments are branded "Diet Egg", "Better Egg", or "Good Egg" depending
+on the model. See [methodology.md](methodology.md) for how each model
+works.
+
+## Full YAML Schema
+
+```yaml
+# Scoring model selection: v3 (default), v2, or v1
+scoring_model: v3
+
+# Skip scoring for authors who already have merged PRs in the target repo.
+# When true (the default), existing contributors get an EXISTING_CONTRIBUTOR
+# trust level without the full scoring pipeline running.
+skip_known_contributors: true
+
+# Graph-based scoring algorithm parameters
+graph_scoring:
+  alpha: 0.85              # Damping factor (0-1)
+  max_iterations: 100      # Maximum iterations for convergence
+  tolerance: 0.000001      # Convergence tolerance
+  context_repo_weight: 0.5 # Weight for the PR's target repo
+  same_language_weight: 0.3  # Weight for same-language repos
+  other_weight: 0.03       # Base weight for other repos
+  diversity_scale: 0.5     # Cross-repo diversity boost
+  volume_scale: 0.3        # PR volume boost
+
+# Trust level thresholds
+thresholds:
+  high_trust: 0.7          # Score >= this is HIGH trust
+  medium_trust: 0.3        # Score >= this is MEDIUM (below = LOW)
+  new_account_days: 30     # Accounts younger than this are flagged
+
+# Recency decay parameters
+recency:
+  half_life_days: 180      # Half-life for exponential decay
+  max_age_days: 730        # Ignore PRs older than this
+
+# Edge weight multipliers for contribution types
+edge_weights:
+  merged_pr: 1.0           # Merged pull request
+  maintainer: 2.0          # Maintainer/owner relationship
+  star: 0.1                # Starring a repository
+  review: 0.5              # Reviewing a pull request
+
+# GitHub API fetch parameters
+fetch:
+  max_prs: 500             # Max merged PRs to fetch per user
+  max_repos_to_enrich: 200 # Max repos to fetch metadata for
+  rate_limit_safety_margin: 100  # Stop when this many calls remain
+
+# Cache time-to-live settings (in hours)
+cache_ttl:
+  repo_metadata_hours: 168 # 7 days
+  user_profile_hours: 24   # 1 day
+  user_prs_hours: 336      # 14 days
+
+# Language ecosystem size normalization
+# Smaller ecosystems get higher multipliers so niche contributions
+# are valued appropriately.
+language_normalization:
+  default: 3.0             # Multiplier for unlisted languages
+  multipliers:
+    JavaScript: 1.0
+    Python: 1.13
+    TypeScript: 1.30
+    Java: 1.55
+    Go: 2.30
+    Rust: 2.63
+    # ... see examples/.good-egg.yml for the full list
+
+# v2 (Better Egg) scoring model parameters
+# Only used when scoring_model is set to v2.
+v2:
+  graph:
+    half_life_days: 180        # Recency decay half-life for v2 graph
+    max_age_days: 730          # Ignore PRs older than this
+    archived_penalty: 0.5      # Penalty multiplier for archived repos
+    fork_penalty: 0.3          # Penalty multiplier for forked repos
+  features:
+    merge_rate: true           # Include merge rate feature
+    account_age: true          # Include account age feature
+  combined_model:
+    intercept: -0.8094         # Logistic regression intercept
+    graph_score_weight: 1.9138 # Weight for graph score
+    merge_rate_weight: -0.7783 # Weight for merge rate
+    account_age_weight: 0.1493 # Weight for log(account_age_days + 1)
+```
+
+## Config Sections
+
+### scoring_model
+
+Selects the scoring model. `v3` (default, Diet Egg) uses alltime merge rate
+as the sole signal with no graph construction. `v2` (Better Egg) combines a
+simplified graph score with merge rate and account age via logistic
+regression. `v1` (Good Egg) uses graph-based scoring only.
+
+When set to `v2`, the parameters under the `v2:` block are used and the
+graph construction is simplified (no self-contribution penalty, no language
+normalization in repo quality, no diversity/volume adjustment). Language
+match personalization weighting (`same_language_weight`) is retained in v2.
+
+v3 does not use graph construction, so the `graph_scoring`, `recency`,
+`edge_weights`, and `language_normalization` sections have no effect. The
+`thresholds` section still controls trust level classification.
+
+### v2 (Better Egg)
+
+Configuration for the Better Egg (v2) scoring model. This section is only
+used when `scoring_model` is set to `v2`.
+
+- **`v2.graph`** -- Graph construction parameters for the simplified v2 graph.
+  Supports `half_life_days`, `max_age_days`, `archived_penalty`, and
+  `fork_penalty`. Note that v2 shares graph algorithm parameters (`alpha`,
+  `max_iterations`, `tolerance`) with the top-level `graph_scoring` config.
+- **`v2.features`** -- Toggle external features on or off. `merge_rate`
+  (merged/(merged+closed)) and `account_age` (log-transformed days) are both
+  enabled by default.
+- **`v2.combined_model`** -- Logistic regression coefficients. The final
+  score is `sigmoid(intercept + graph_score_weight * graph_score +
+  merge_rate_weight * merge_rate + account_age_weight *
+  log(account_age_days + 1))`.
+
+### skip_known_contributors
+
+When `true` (the default), Good Egg performs a lightweight pre-check before
+running the full scoring pipeline. If the PR author already has merged pull
+requests in the target repository, scoring is skipped and the trust level is
+set to `EXISTING_CONTRIBUTOR`. Set to `false` to always run full scoring.
+
+### graph_scoring
+
+Controls the graph-based scoring algorithm. The `alpha` parameter is the
+damping factor -- higher values give more weight to the structure of the
+contribution graph. The `context_repo_weight` and `same_language_weight`
+parameters control how much the context repository and same-language
+repositories influence the score.
+
+### thresholds
+
+Defines the boundaries between trust levels. A normalized score at or
+above `high_trust` maps to HIGH, at or above `medium_trust` maps to MEDIUM,
+and below that maps to LOW. Accounts younger than `new_account_days` are
+flagged.
+
+### recency
+
+Controls how recent contributions are weighted relative to older ones.
+`half_life_days` sets the exponential decay half-life; contributions at
+that age carry half the weight of new ones. `max_age_days` sets a hard
+cutoff -- older PRs are ignored entirely.
+
+### edge_weights
+
+Multipliers for different types of contributions. These affect the edge
+weights in the contribution graph.
+
+### fetch
+
+Controls how much data is retrieved from the GitHub API per user. Reducing
+`max_prs` lowers API usage at the cost of less data for scoring.
+
+### cache_ttl
+
+Time-to-live for cached GitHub API responses. The cache avoids refetching
+data that has not changed.
+
+### language_normalization
+
+Adjusts contribution weights by language ecosystem size. Languages with
+smaller ecosystems (fewer repositories on GitHub) get higher multipliers so
+that contributions to niche projects are not undervalued.
+
+## Environment Variable Overrides
+
+The following environment variables override individual config values:
+
+| Variable | Config Path | Type |
+|----------|-------------|------|
+| `GOOD_EGG_ALPHA` | `graph_scoring.alpha` | float |
+| `GOOD_EGG_OTHER_WEIGHT` | `graph_scoring.other_weight` | float |
+| `GOOD_EGG_DIVERSITY_SCALE` | `graph_scoring.diversity_scale` | float |
+| `GOOD_EGG_VOLUME_SCALE` | `graph_scoring.volume_scale` | float |
+| `GOOD_EGG_MAX_PRS` | `fetch.max_prs` | int |
+| `GOOD_EGG_HIGH_TRUST` | `thresholds.high_trust` | float |
+| `GOOD_EGG_MEDIUM_TRUST` | `thresholds.medium_trust` | float |
+| `GOOD_EGG_HALF_LIFE_DAYS` | `recency.half_life_days` | int |
+| `GOOD_EGG_SCORING_MODEL` | `scoring_model` | str (`v1`, `v2`, or `v3`) |
+| `GOOD_EGG_SKIP_KNOWN_CONTRIBUTORS` | `skip_known_contributors` | bool (`true`/`false`) |
+
+## Programmatic Configuration
+
+In Python, create a `GoodEggConfig` directly:
+
+```python
+from good_egg import GoodEggConfig
+
+config = GoodEggConfig(
+    thresholds={"high_trust": 0.8, "medium_trust": 0.4},
+    graph_scoring={"alpha": 0.9},
+)
+```
+
+Or load from a YAML file:
+
+```python
+from good_egg.config import load_config
+
+config = load_config(".good-egg.yml")
+```
+
+The `GoodEggConfig` class is composed of the following sub-configs:
+`GraphScoringConfig`, `EdgeWeightConfig`, `RecencyConfig`,
+`ThresholdConfig`, `CacheTTLConfig`, `LanguageNormalization`,
+`FetchConfig`, and (for v2) `V2Config`.
