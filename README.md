@@ -9,6 +9,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
 | v0.1.2 | [`v0.1.2`](https://github.com/chainguard-actions/2ndSetAI-good-egg/tree/v0.1.2) | [`4d9541b`](https://github.com/2ndSetAI/good-egg/commit/4d9541b8d055758174247b5bff5da928fb8af903) |
+| v2.0.0 | [`v2.0.0`](https://github.com/chainguard-actions/2ndSetAI-good-egg/tree/v2.0.0) | [`9d3e310`](https://github.com/2ndSetAI/good-egg/commit/9d3e310471fa5ea76f5f47ec6d917ed41cdc4649) |
 
 ## Privacy
 
