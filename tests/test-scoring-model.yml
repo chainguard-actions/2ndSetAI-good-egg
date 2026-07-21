@@ -1,29 +1,95 @@
-name: Test scoring-model input
+name: Test scoring model selection
 on:
   workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_EVENT_NAME: pull_request
-      GITHUB_REF: refs/pull/1/merge
-      GITHUB_HEAD_REF: feature-branch
-      GITHUB_BASE_REF: main
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create fake PR event file
+        run: |
+          mkdir -p /tmp/github-events
+          cat > /tmp/github-events/pr-event.json <<'EOF'
+          {
+            "action": "opened",
+            "number": 1,
+            "pull_request": {
+              "number": 1,
+              "user": {
+                "login": "octocat",
+                "type": "User"
+              },
+              "head": {
+                "ref": "feature-branch",
+                "sha": "abc123"
+              },
+              "base": {
+                "ref": "main",
+                "sha": "def456"
+              },
+              "title": "Test PR",
+              "body": "Test PR body"
+            },
+            "repository": {
+              "full_name": "octocat/Hello-World",
+              "name": "Hello-World",
+              "owner": {
+                "login": "octocat"
+              }
+            },
+            "sender": {
+              "login": "octocat",
+              "type": "User"
+            }
+          }
+          EOF
 
       - id: action
         uses: .
         continue-on-error: true
+        env:
+          GITHUB_EVENT_NAME: pull_request
+          GITHUB_EVENT_PATH: /tmp/github-events/pr-event.json
+          GITHUB_REPOSITORY: octocat/Hello-World
+          GITHUB_HEAD_REF: feature-branch
+          GITHUB_BASE_REF: main
+          GITHUB_REF: refs/pull/1/merge
         with:
           github-token: ${{ github.token }}
-          scoring-model: 'v2'
           comment: 'false'
           check-run: 'false'
           fail-on-low: 'false'
+          scoring-model: 'v2'
 
-      - name: Assert action ran with scoring-model input
+      - name: Assert action ran with scoring-model v2
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          SCORING_MODEL_OUT: ${{ steps.action.outputs.scoring-model }}
         run: |
-          echo "Action completed (may fail due to no real PR context in act)"
-          echo "outcome: ${{ steps.action.outcome }}"
-          echo "PASS: scoring-model input was accepted"
+          echo "action outcome: $OUTCOME"
+          echo "scoring-model output: $SCORING_MODEL_OUT"
+
+          # The action should either succeed or fail due to API auth issues
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded"
+            # If scoring-model output is set, it should be a valid value
+            if [ -n "$SCORING_MODEL_OUT" ]; then
+              case "$SCORING_MODEL_OUT" in
+                v1|v2|v3)
+                  echo "PASS: scoring-model is valid: $SCORING_MODEL_OUT"
+                  ;;
+                *)
+                  echo "FAIL: unexpected scoring-model value: $SCORING_MODEL_OUT"
+                  exit 1
+                  ;;
+              esac
+            fi
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed (expected in test environment without real GitHub API access)"
+          else
+            echo "FAIL: unexpected outcome: $OUTCOME"
+            exit 1
+          fi
+
+          echo "PASS: scoring-model test passed"

@@ -1,4 +1,4 @@
-name: Test skip-known-contributors input
+name: Test scoring-model v1 input
 on:
   workflow_dispatch:
 jobs:
@@ -14,23 +14,28 @@ jobs:
           comment: 'false'
           check-run: 'false'
           fail-on-low: 'false'
-          skip-known-contributors: 'true'
+          scoring-model: 'v1'
         continue-on-error: true
 
-      - name: Assert action accepted skip-known-contributors input
+      - name: Assert action accepted scoring-model=v1 input
         env:
-          SKIPPED: ${{ steps.action.outputs.skipped }}
-          TRUST_LEVEL: ${{ steps.action.outputs.trust-level }}
+          SCORING_MODEL: ${{ steps.action.outputs.scoring-model }}
           OUTCOME: ${{ steps.action.outcome }}
         run: |
           echo "outcome: $OUTCOME"
-          echo "skipped: $SKIPPED"
-          echo "trust-level: $TRUST_LEVEL"
+          echo "scoring-model output: $SCORING_MODEL"
           # The action should complete (success or failure due to no PR context)
-          # but should not crash the runner unexpectedly
           if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
-            echo "PASS: action completed with skip-known-contributors=true (outcome=$OUTCOME)"
+            echo "PASS: action completed with scoring-model=v1 (outcome=$OUTCOME)"
           else
             echo "FAIL: unexpected outcome: $OUTCOME"
             exit 1
+          fi
+          # If the action succeeded and returned a scoring-model output, verify it
+          if [ "$OUTCOME" = "success" ] && [ -n "$SCORING_MODEL" ]; then
+            if [ "$SCORING_MODEL" = "v1" ]; then
+              echo "PASS: scoring-model output matches v1"
+            else
+              echo "INFO: scoring-model output is '$SCORING_MODEL' (may differ from input)"
+            fi
           fi

@@ -1,0 +1,4 @@
+# Good Egg configuration fixture for testing
+trust:
+  high: 0.7
+  medium: 0.4

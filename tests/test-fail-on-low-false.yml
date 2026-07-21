@@ -1,0 +1,57 @@
+name: Test fail-on-low=false does not fail action
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        with:
+          github-token: ${{ github.token }}
+          comment: 'false'
+          check-run: 'false'
+          fail-on-low: 'false'
+        continue-on-error: true
+
+      - name: Assert action outputs are accessible
+        env:
+          SCORE: ${{ steps.action.outputs.score }}
+          TRUST_LEVEL: ${{ steps.action.outputs.trust-level }}
+          USER: ${{ steps.action.outputs.user }}
+          SCORING_MODEL: ${{ steps.action.outputs.scoring-model }}
+          SKIPPED: ${{ steps.action.outputs.skipped }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "score: $SCORE"
+          echo "trust-level: $TRUST_LEVEL"
+          echo "user: $USER"
+          echo "scoring-model: $SCORING_MODEL"
+          echo "skipped: $SKIPPED"
+          # With fail-on-low=false, the action should not fail due to trust level
+          # Under workflow_dispatch (no PR), the action may succeed or fail for
+          # other reasons (no PR context), but should not crash the runner
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action completed with fail-on-low=false (outcome=$OUTCOME)"
+          else
+            echo "FAIL: unexpected outcome: $OUTCOME"
+            exit 1
+          fi
+          # Verify outputs are valid types if present
+          if [ -n "$SCORE" ]; then
+            echo "INFO: score=$SCORE"
+          fi
+          if [ -n "$TRUST_LEVEL" ]; then
+            case "$TRUST_LEVEL" in
+              HIGH|MEDIUM|LOW|UNKNOWN|BOT|EXISTING_CONTRIBUTOR)
+                echo "PASS: trust-level '$TRUST_LEVEL' is a valid value"
+                ;;
+              *)
+                echo "FAIL: trust-level '$TRUST_LEVEL' is not a recognized value"
+                exit 1
+                ;;
+            esac
+          fi

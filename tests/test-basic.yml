@@ -1,4 +1,4 @@
-name: Test skip-known-contributors input
+name: Test basic usage (no PR context)
 on:
   workflow_dispatch:
 jobs:
@@ -14,22 +14,26 @@ jobs:
           comment: 'false'
           check-run: 'false'
           fail-on-low: 'false'
-          skip-known-contributors: 'true'
         continue-on-error: true
 
-      - name: Assert action accepted skip-known-contributors input
+      - name: Assert action ran (outputs present or action handled non-PR gracefully)
         env:
-          SKIPPED: ${{ steps.action.outputs.skipped }}
           TRUST_LEVEL: ${{ steps.action.outputs.trust-level }}
+          SCORE: ${{ steps.action.outputs.score }}
+          SKIPPED: ${{ steps.action.outputs.skipped }}
           OUTCOME: ${{ steps.action.outcome }}
         run: |
           echo "outcome: $OUTCOME"
-          echo "skipped: $SKIPPED"
           echo "trust-level: $TRUST_LEVEL"
-          # The action should complete (success or failure due to no PR context)
-          # but should not crash the runner unexpectedly
+          echo "score: $SCORE"
+          echo "skipped: $SKIPPED"
+          # Under workflow_dispatch there is no PR, so the action may:
+          # 1. Succeed with UNKNOWN/BOT/EXISTING_CONTRIBUTOR trust level
+          # 2. Succeed with empty outputs (no PR to score)
+          # 3. Fail gracefully (non-zero exit but we continue-on-error)
+          # We just verify the action ran without crashing the runner
           if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
-            echo "PASS: action completed with skip-known-contributors=true (outcome=$OUTCOME)"
+            echo "PASS: action completed (outcome=$OUTCOME)"
           else
             echo "FAIL: unexpected outcome: $OUTCOME"
             exit 1
