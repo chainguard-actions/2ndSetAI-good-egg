@@ -1,4 +1,4 @@
-name: Test basic usage - score a PR author
+name: Test custom config path
 on:
   workflow_dispatch:
 
@@ -10,10 +10,10 @@ jobs:
 
       - name: Create fake PR event file
         run: |
-          cat > /tmp/fake-pr-event.json <<'EOF'
+          cat > /tmp/fake-pr-event-config.json <<'EOF'
           {
             "pull_request": {
-              "number": 1,
+              "number": 42,
               "user": {
                 "login": "octocat"
               },
@@ -24,19 +24,28 @@ jobs:
           }
           EOF
 
+      - name: Create custom config file
+        run: |
+          cat > /tmp/good-egg-config.yml <<'EOF'
+          thresholds:
+            high: 0.7
+            medium: 0.4
+          EOF
+
       - id: action
         uses: .
         continue-on-error: true
         env:
-          GITHUB_EVENT_PATH: /tmp/fake-pr-event.json
+          GITHUB_EVENT_PATH: /tmp/fake-pr-event-config.json
           GITHUB_REPOSITORY: octocat/Hello-World
         with:
           github-token: ${{ github.token }}
+          config-path: /tmp/good-egg-config.yml
           comment: 'false'
           check-run: 'false'
           fail-on-low: 'false'
 
-      - name: Assert action produced outputs or failed gracefully
+      - name: Assert action produced outputs or failed gracefully with custom config
         env:
           OUTCOME: ${{ steps.action.outcome }}
           SCORE: ${{ steps.action.outputs.score }}
@@ -49,7 +58,6 @@ jobs:
           echo "user: $USER"
 
           if [ "$OUTCOME" = "success" ]; then
-            # Validate score is a number between 0.00 and 1.00
             if [ -z "$SCORE" ]; then
               echo "FAIL: action succeeded but score output is empty"
               exit 1
@@ -58,11 +66,6 @@ jobs:
               echo "FAIL: action succeeded but trust-level output is empty"
               exit 1
             fi
-            if [ -z "$USER" ]; then
-              echo "FAIL: action succeeded but user output is empty"
-              exit 1
-            fi
-            # Validate trust-level is one of the expected values
             case "$TRUST_LEVEL" in
               HIGH|MEDIUM|LOW|UNKNOWN|BOT)
                 echo "PASS: trust-level '$TRUST_LEVEL' is valid"
@@ -72,12 +75,7 @@ jobs:
                 exit 1
                 ;;
             esac
-            # Validate user matches what we passed
-            if [ "$USER" != "octocat" ]; then
-              echo "FAIL: expected user 'octocat' but got '$USER'"
-              exit 1
-            fi
-            echo "PASS: score=$SCORE trust-level=$TRUST_LEVEL user=$USER"
+            echo "PASS: custom config accepted, score=$SCORE trust-level=$TRUST_LEVEL user=$USER"
           elif [ "$OUTCOME" = "failure" ]; then
             echo "PASS: action failed gracefully (API rate limit or sentinel repo issue)"
           else

@@ -8,7 +8,7 @@
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
-**Harden Agent Version:** `1`
+**Harden Agent Version:** `2`
 
 Action **2ndSetAI--good-egg/v0.1.2** was hardened automatically. 2 finding(s) were identified and resolved across 1 iteration(s).
 
@@ -16,28 +16,30 @@ Action **2ndSetAI--good-egg/v0.1.2** was hardened automatically. 2 finding(s) we
 
 ### unpinned-uses (severity: high)
 
-Two `uses:` references in action.yml use mutable version tags instead of full 40-character commit SHA digests, making the action vulnerable to supply-chain attacks if the referenced tag is moved or overwritten.
-- `actions/setup-python@v5` (line 42)
+Two `uses:` references in action.yml use mutable version tags instead of pinned 40-character SHA digests, making the action vulnerable to supply-chain attacks if the referenced tags are moved or overwritten:
+- `actions/setup-python@v5` (line 41)
 - `astral-sh/setup-uv@v4` (line 46)
+These should be pinned to their full commit SHAs, e.g. `actions/setup-python@<40-char-sha> # v5`.
 
 Locations:
 
-- `action.yml:42`
+- `action.yml:41`
 - `action.yml:46`
 
 ### script-injection (severity: high)
 
-Sub-rule (a): The expression `${{ github.action_path }}` is interpolated directly inside `run:` shell command strings in two steps. Although `github.action_path` is typically not attacker-controlled, any `${{ ... }}` expression inside a `run:` block undergoes YAML template substitution before the shell sees it, making it a script-injection risk per the check rules.
+Two `run:` blocks directly interpolate a `${{ ... }}` GitHub Actions expression inside the shell command string (sub-rule a). Specifically, `${{ github.action_path }}` is substituted into the shell script before the shell ever sees it, meaning any unexpected characters in the value would be parsed by the shell before quoting can protect them.
 
-'Install good-egg' step (line 52): `cd ${{ github.action_path }}`
-'Run Good Egg' step (line 65): `cd ${{ github.action_path }}`
+Offending lines:
+- Line 53: `cd ${{ github.action_path }}` (in the 'Install good-egg' step)
+- Line 66: `cd ${{ github.action_path }}` (in the 'Run Good Egg' step)
 
-Fix: use the environment variable `$GITHUB_ACTION_PATH` instead of the expression `${{ github.action_path }}` inside `run:` blocks.
+The safe pattern is to use the pre-set environment variable `$GITHUB_ACTION_PATH` instead, which is already available as a shell variable and does not require expression interpolation: `cd "$GITHUB_ACTION_PATH"`
 
 Locations:
 
-- `action.yml:52`
-- `action.yml:65`
+- `action.yml:53`
+- `action.yml:66`
 
 ## Iteration Notes
 
@@ -47,5 +49,5 @@ Locations:
 
 **Notes:**
 
-Fixed all findings in action.yml: (1) Pinned actions/setup-python@v5 to full SHA a26af69be951a213d495a4c3e4e4022e16d87065 and astral-sh/setup-uv@v4 to full SHA 38f3f104447c67c051c4a08e39b64a148898af3a, preserving the original tags as comments. (2) Replaced both occurrences of `${{ github.action_path }}` in run: blocks with the built-in `$GITHUB_ACTION_PATH` environment variable (also added proper quoting), eliminating the script-injection risk.
+Fixed two unpinned action references by pinning to full commit SHAs: actions/setup-python@v5 → @a26af69be951a213d495a4c3e4e4022e16d87065 # v5, astral-sh/setup-uv@v4 → @38f3f104447c67c051c4a08e39b64a148898af3a # v4. Fixed two script-injection instances by replacing `${{ github.action_path }}` with the pre-set shell environment variable `"$GITHUB_ACTION_PATH"` in both the 'Install good-egg' and 'Run Good Egg' steps.
 
