@@ -14,31 +14,31 @@ Action **2ndSetAI--good-egg/v0.1.2** was hardened automatically. 2 finding(s) we
 
 ## Findings Fixed
 
-### unpinned-uses (severity: high)
-
-action.yml references two actions using mutable version tags instead of pinned 40-character SHA commit hashes. This exposes the action to supply-chain attacks if the upstream tags are moved or compromised. Failing references: `actions/setup-python@v5` (line 43) and `astral-sh/setup-uv@v4` (line 47).
-
-Locations:
-
-- `action.yml:43`
-- `action.yml:47`
-
 ### script-injection (severity: high)
 
-Sub-rule (a): Two `run:` blocks in action.yml directly interpolate `${{ github.action_path }}` inside shell command strings. Any `${{ ... }}` expression directly inside a `run:` block is a script-injection risk because the value is substituted by the GitHub Actions template engine before the shell ever sees it, bypassing shell quoting. Offending lines: `cd ${{ github.action_path }}` in the 'Install good-egg' step and `cd ${{ github.action_path }}` in the 'Run Good Egg' step. These should be replaced with the environment variable `$GITHUB_ACTION_PATH` which is set automatically by the runner.
+Two `run:` blocks in action.yml directly interpolate `${{ github.action_path }}` inside shell commands (sub-rule a: direct expression interpolation). Any `${{ ... }}` expression inside a `run:` script is a script-injection risk because YAML template substitution occurs before the shell ever sees the value. Offending lines: `cd ${{ github.action_path }}` in both the 'Install good-egg' step and the 'Run Good Egg' step. These should be replaced with the environment variable `$GITHUB_ACTION_PATH` which is already set by the runner.
 
 Locations:
 
-- `action.yml:53`
-- `action.yml:68`
+- `action.yml:44`
+- `action.yml:55`
+
+### unpinned-uses (severity: high)
+
+Two `uses:` references in action.yml are pinned to mutable version tags rather than immutable 40-character SHA digests, making the action vulnerable to supply-chain attacks if the upstream tag is moved or compromised. Failing references: `actions/setup-python@v5` and `astral-sh/setup-uv@v4`. Each should be replaced with the full commit SHA of the intended version, e.g. `actions/setup-python@<40-char-sha> # v5`.
+
+Locations:
+
+- `action.yml:40`
+- `action.yml:43`
 
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** unpinned-uses, script-injection
+**Fixes applied:** script-injection, unpinned-uses
 
 **Notes:**
 
-Fixed two unpinned action references by pinning to full commit SHAs (actions/setup-python@v5 → a26af69be951a213d495a4c3e4e4022e16d87065, astral-sh/setup-uv@v4 → 38f3f104447c67c051c4a08e39b64a148898af3a). Fixed two script-injection instances by replacing `${{ github.action_path }}` with the runner-provided `$GITHUB_ACTION_PATH` environment variable in both `run:` blocks, properly quoted.
+Fixed all three findings in hardened/action/action.yml: (1) Replaced both `${{ github.action_path }}` expressions in `run:` blocks with `"$GITHUB_ACTION_PATH"` (the runner-provided env var, quoted) to eliminate script-injection risk. (2) Pinned `actions/setup-python@v5` to its full SHA `a26af69be951a213d495a4c3e4e4022e16d87065` and `astral-sh/setup-uv@v4` to its full SHA `38f3f104447c67c051c4a08e39b64a148898af3a`, with the original tags preserved as inline comments.
 
