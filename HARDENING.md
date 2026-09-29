@@ -14,31 +14,34 @@ Action **2ndSetAI--good-egg/v0.1.2** was hardened automatically. 2 finding(s) we
 
 ## Findings Fixed
 
-### script-injection (severity: high)
-
-Two `run:` blocks in action.yml directly interpolate `${{ github.action_path }}` inside shell commands (sub-rule a: direct expression interpolation). Any `${{ ... }}` expression inside a `run:` script is a script-injection risk because YAML template substitution occurs before the shell ever sees the value. Offending lines: `cd ${{ github.action_path }}` in both the 'Install good-egg' step and the 'Run Good Egg' step. These should be replaced with the environment variable `$GITHUB_ACTION_PATH` which is already set by the runner.
-
-Locations:
-
-- `action.yml:44`
-- `action.yml:55`
-
 ### unpinned-uses (severity: high)
 
-Two `uses:` references in action.yml are pinned to mutable version tags rather than immutable 40-character SHA digests, making the action vulnerable to supply-chain attacks if the upstream tag is moved or compromised. Failing references: `actions/setup-python@v5` and `astral-sh/setup-uv@v4`. Each should be replaced with the full commit SHA of the intended version, e.g. `actions/setup-python@<40-char-sha> # v5`.
+action.yml references two GitHub Actions using mutable version tags instead of pinned full-length SHA commit hashes. This exposes the action to supply-chain attacks if the upstream tag is moved or compromised. Failing references: `actions/setup-python@v5` and `astral-sh/setup-uv@v4`. These should be pinned to their full 40-character commit SHAs (e.g. `actions/setup-python@<sha> # v5`).
 
 Locations:
 
 - `action.yml:40`
-- `action.yml:43`
+- `action.yml:44`
+
+### script-injection (severity: high)
+
+Sub-rule (a): `${{ github.action_path }}` is interpolated directly inside `run:` shell command strings in two steps. Any `${{ ... }}` expression embedded directly in a `run:` block is a script-injection risk because the value is substituted into the shell script before the shell parses it. The affected lines are:
+- Step 'Install good-egg': `cd ${{ github.action_path }}`
+- Step 'Run Good Egg': `cd ${{ github.action_path }}`
+The safe pattern is to pass the value through an `env:` variable and reference it as `"$ACTION_PATH"` in the shell script.
+
+Locations:
+
+- `action.yml:51`
+- `action.yml:64`
 
 ## Iteration Notes
 
 ### Iteration 1
 
-**Fixes applied:** script-injection, unpinned-uses
+**Fixes applied:** unpinned-uses, script-injection
 
 **Notes:**
 
-Fixed all three findings in hardened/action/action.yml: (1) Replaced both `${{ github.action_path }}` expressions in `run:` blocks with `"$GITHUB_ACTION_PATH"` (the runner-provided env var, quoted) to eliminate script-injection risk. (2) Pinned `actions/setup-python@v5` to its full SHA `a26af69be951a213d495a4c3e4e4022e16d87065` and `astral-sh/setup-uv@v4` to its full SHA `38f3f104447c67c051c4a08e39b64a148898af3a`, with the original tags preserved as inline comments.
+1. Pinned actions/setup-python@v5 to full SHA a26af69be951a213d495a4c3e4e4022e16d87065 and astral-sh/setup-uv@v4 to full SHA 38f3f104447c67c051c4a08e39b64a148898af3a, preserving the version tags as comments. 2. Moved ${{ github.action_path }} out of both run: blocks (Install good-egg and Run Good Egg steps) into env: variables named ACTION_PATH, then referenced them as "$ACTION_PATH" in the shell scripts to prevent script injection.
 

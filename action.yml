@@ -61,8 +61,9 @@ runs:
       shell: bash
       env:
         SETUPTOOLS_SCM_PRETEND_VERSION: '0.0.0'
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        cd "$GITHUB_ACTION_PATH"
+        cd "$ACTION_PATH"
         uv sync --frozen
     - name: Run Good Egg
       id: score
@@ -73,8 +74,9 @@ runs:
         INPUT_COMMENT: ${{ inputs.comment }}
         INPUT_CHECK-RUN: ${{ inputs.check-run }}
         INPUT_FAIL-ON-LOW: ${{ inputs.fail-on-low }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        cd "$GITHUB_ACTION_PATH"
+        cd "$ACTION_PATH"
         uv run python -m good_egg.action
 branding:
   icon: 'shield'
