@@ -1,6 +1,7 @@
 name: 'Good Egg: Trust Scoring PRs'
 description: 'Score PR author trustworthiness using contribution graph analysis'
 author: 'Good Egg Contributors'
+
 inputs:
   github-token:
     description: 'GitHub token for API access'
@@ -27,6 +28,7 @@ inputs:
   skip-known-contributors:
     description: 'Skip scoring for authors with merged PRs in the repo (true/false)'
     required: false
+
 outputs:
   score:
     description: 'Normalized trust score (0.0 - 1.0)'
@@ -43,6 +45,7 @@ outputs:
   skipped:
     description: 'Whether scoring was skipped for an existing contributor (true/false)'
     value: ${{ steps.score.outputs.skipped }}
+
 runs:
   using: 'composite'
   steps:
@@ -67,9 +70,11 @@ runs:
       uses: chainguard-actions/actions-setup-python@ace3254bb5011efbd0650a7120a0441ebd1f9400 # v5
       with:
         python-version: '3.12'
+
     - name: Install good-egg
       shell: bash
       run: pip install 'good-egg>=2,<3'
+
     - name: Run Good Egg
       id: score
       shell: bash
@@ -82,6 +87,7 @@ runs:
         INPUT_SCORING_MODEL: ${{ inputs.scoring-model }}
         INPUT_SKIP_KNOWN_CONTRIBUTORS: ${{ inputs.skip-known-contributors }}
       run: python -m good_egg.action
+
 branding:
   icon: 'shield'
   color: 'green'

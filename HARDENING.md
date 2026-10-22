@@ -16,11 +16,11 @@ Action **2ndSetAI--good-egg/v2.0.0** was hardened automatically. 1 finding(s) we
 
 ### unpinned-uses (severity: high)
 
-The composite action step 'Set up Python' uses `actions/setup-python@v5`, which is pinned to a mutable version tag rather than an immutable 40-character SHA commit hash. This means the action could be silently updated or compromised without the workflow noticing, enabling supply-chain attacks. It should be pinned to a full SHA, e.g. `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5`.
+The composite action step references a mutable tag instead of a full 40-character commit SHA: `uses: actions/setup-python@v5`.
 
 Locations:
 
-- `action.yml:51`
+- `action.yml:53`
 
 ## Iteration Notes
 
@@ -30,5 +30,5 @@ Locations:
 
 **Notes:**
 
-Pinned `actions/setup-python@v5` to its full commit SHA `a26af69be951a213d495a4c3e4e4022e16d87065` in hardened/action/action.yml (line 51). The `# v5` comment is retained for human readability.
+Pinned actions/setup-python@v5 to a26af69be951a213d495a4c3e4e4022e16d87065 # v5 in action.yml.
 
