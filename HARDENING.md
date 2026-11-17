@@ -4,7 +4,7 @@
 
 > This file was generated automatically by the hardening agent.
 
-**Policy SHA:** `d636be7e43ef829af6e853da6b3c7566db9f72fe`
+**Policy SHA:** `374911c4be584df24e6da57af2d990570ef0f859`
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
@@ -16,7 +16,7 @@ Action **2ndSetAI--good-egg/v2.0.0** was hardened automatically. 1 finding(s) we
 
 ### unpinned-uses (severity: high)
 
-The composite action step references a mutable tag instead of a full 40-character commit SHA: `uses: actions/setup-python@v5`.
+The composite action step references 'uses: actions/setup-python@v5', which is a mutable tag rather than a full 40-character commit SHA. Pin it to a commit SHA, e.g. actions/setup-python@<sha> # v5.
 
 Locations:
 
